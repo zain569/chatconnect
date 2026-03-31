@@ -9,13 +9,13 @@ import cookieParser from "cookie-parser";
 const app = express();
 const cookieOptions = {
     httpOnly: true,
-    secure: false,
-    sameSite: "None",
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000
 };
 
 app.use(cors({
-    origin: ["http://localhost:5173","https://chatconnecct.netlify.app"],
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
     credentials: true
 }));
 
@@ -24,7 +24,7 @@ app.use(cookieParser());
 app.use(express.json())
 app.use(urlencoded({ extended: true }))
 
-const url = 'mongodb://zainnaveed359_db_user:zzaaiinn1.2.3@ac-0ofxrjd-shard-00-00.ii7y96v.mongodb.net:27017,ac-0ofxrjd-shard-00-01.ii7y96v.mongodb.net:27017,ac-0ofxrjd-shard-00-02.ii7y96v.mongodb.net:27017/?ssl=true&replicaSet=atlas-128yqp-shard-0&authSource=admin&appName=Cluster0'
+const url = process.env.MONGODB_URI || 'mongodb://zainnaveed359_db_user:zzaaiinn1.2.3@ac-0ofxrjd-shard-00-00.ii7y96v.mongodb.net:27017,ac-0ofxrjd-shard-00-01.ii7y96v.mongodb.net:27017,ac-0ofxrjd-shard-00-02.ii7y96v.mongodb.net:27017/?ssl=true&replicaSet=atlas-128yqp-shard-0&authSource=admin&appName=Cluster0'
 
 const schema = new mongoose.Schema({
     userId: { type: Number, unique: true, required: true },
@@ -79,7 +79,7 @@ const verifyToken = (req, res, next) => {
     }
 
     try {
-        const decoded = jwt.verify(token, "chatConnect");
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || "chatConnect");
         req.user = decoded; // Store decoded info in request for later use
         next();
     } catch (err) {
@@ -99,6 +99,13 @@ app.get('/users', verifyToken, async (req, res) => {
 
 app.get("/check-auth", verifyToken, async (req, res) => {
     try {
+        if (!req.user || !req.user.email) {
+            return res.status(401).json({
+                loggedIn: false,
+                message: "Invalid token data"
+            });
+        }
+
         const dbUserData = await Users.findOne({ email: req.user.email });
 
         if (!dbUserData) {
@@ -152,7 +159,7 @@ app.post("/register", async (req, res) => {
         }
 
         const jwtToken = await new Promise((resolve, reject) => {
-            jwt.sign({ email }, "chatConnect", { expiresIn: '7d' }, (err, token) => {
+            jwt.sign({ email }, process.env.JWT_SECRET || "chatConnect", { expiresIn: '7d' }, (err, token) => {
                 if (err) return reject(err);
                 resolve(token);
             });
@@ -231,7 +238,7 @@ app.post("/login", async (req, res) => {
         }
 
         const jwtToken = await new Promise((resolve, reject) => {
-            jwt.sign({ email: dbUserData.email }, "chatConnect", { expiresIn: '7d' }, (err, token) => {
+            jwt.sign({ email: dbUserData.email }, process.env.JWT_SECRET || "chatConnect", { expiresIn: '7d' }, (err, token) => {
                 if (err) {
                     return reject(err);
                 }
@@ -438,6 +445,7 @@ app.get('/chat', async (req, res) => {
     }
 });
 
-app.listen(3000, () => {
-    console.log('🚀 Server is running on port 3000')
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server is running on port ${PORT}`)
 });
