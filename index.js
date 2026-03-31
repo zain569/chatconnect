@@ -9,7 +9,7 @@ import cookieParser from "cookie-parser";
 const app = express();
 const cookieOptions = {
     httpOnly: true,
-    secure: false,
+    secure: true,
     sameSite: "None",
     maxAge: 7 * 24 * 60 * 60 * 1000
 };
