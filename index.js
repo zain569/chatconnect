@@ -7,17 +7,35 @@ import jwt from 'jsonwebtoken';
 import cookieParser from "cookie-parser";
 
 const app = express();
-const cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000
+const isProduction = process.env.NODE_ENV === "production";
+const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    "https://chatconnecct.netlify.app",
+    "http://localhost:5173"
+].filter(Boolean);
+
+app.set("trust proxy", 1);
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+
+        return callback(new Error("CORS origin not allowed"));
+    },
+    credentials: true
 };
 
-app.use(cors({
-    origin: process.env.FRONTEND_URL || ["http://localhost:5173","https://chatconnecct.netlify.app"],
-    credentials: true
-}));
+const getCookieOptions = () => ({
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000
+});
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.use(cookieParser());
 
@@ -165,7 +183,7 @@ app.post("/register", async (req, res) => {
             });
         });
 
-        res.cookie("token", jwtToken, cookieOptions);
+        res.cookie("token", jwtToken, getCookieOptions());
 
         const userId = await generateUserId();
 
@@ -246,7 +264,7 @@ app.post("/login", async (req, res) => {
             });
         });
 
-        res.cookie("token", jwtToken, cookieOptions);
+        res.cookie("token", jwtToken, getCookieOptions());
 
         return res.status(200).json({
             message: "Login successful",
