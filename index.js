@@ -408,7 +408,7 @@ app.post("/send-message", async (req, res) => {
             day: "numeric",
             hour: "numeric",
             minute: "numeric",
-            timeZone: "Asia/Karachi", // Replace with your desired time zone (IANA name)
+            timeZone: "Asia/Karachi",
         };
 
         const currentTime = new Intl.DateTimeFormat("en-US", options).format(new Date());
