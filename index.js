@@ -48,7 +48,7 @@ app.use(cookieParser());
 app.use(express.json())
 app.use(urlencoded({ extended: true }))
 
-const url = process.env.MONGODB_URI || 'mongodb://zainnaveed359_db_user:zzaaiinn1.2.3@ac-0ofxrjd-shard-00-00.ii7y96v.mongodb.net:27017,ac-0ofxrjd-shard-00-01.ii7y96v.mongodb.net:27017,ac-0ofxrjd-shard-00-02.ii7y96v.mongodb.net:27017/?ssl=true&replicaSet=atlas-128yqp-shard-0&authSource=admin&appName=Cluster0'
+const url = 'mongodb://zainnaveed359_db_user:zzaaiinn1.2.3@ac-0ofxrjd-shard-00-00.ii7y96v.mongodb.net:27017,ac-0ofxrjd-shard-00-01.ii7y96v.mongodb.net:27017,ac-0ofxrjd-shard-00-02.ii7y96v.mongodb.net:27017/?ssl=true&replicaSet=atlas-128yqp-shard-0&authSource=admin&appName=Cluster0'
 
 const schema = new mongoose.Schema({
     userId: { type: Number, unique: true, required: true },
@@ -57,8 +57,8 @@ const schema = new mongoose.Schema({
     password: { type: String, required: true },
     contacts: [
         {
-            contactId: Number,   // real userId
-            contactName: String  // custom name (user gives)
+            contactId: Number,
+            contactName: String  
         }
     ]
 })
@@ -114,7 +114,7 @@ const verifyToken = (req, res, next) => {
 // ✅ Get users
 app.get('/users', verifyToken, async (req, res) => {
     try {
-        const data = await Users.find();
+        const data = await Users.find().select('-password');
         res.json(data);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -182,20 +182,19 @@ app.post("/register", async (req, res) => {
             })
         }
 
+        const userId = await generateUserId();
+        const hashPassword = await bcrypt.hash(password, 10);
+        const user = new Users({ userId, name, email, password: hashPassword, contacts: [] }); // CHANGED: contacts should be array
+        await user.save();
+
         const jwtToken = await new Promise((resolve, reject) => {
-            jwt.sign({ email }, process.env.JWT_SECRET || "chatConnect", { expiresIn: '7d' }, (err, token) => {
+            jwt.sign({ email, userId }, process.env.JWT_SECRET || "chatConnect", { expiresIn: '7d' }, (err, token) => {
                 if (err) return reject(err);
                 resolve(token);
             });
         });
 
-        res.cookie("token", jwtToken, getCookieOptions());
-
-        const userId = await generateUserId();
-
-        const hashPassword = await bcrypt.hash(password, 10);
-        const user = new Users({ userId, name, email, password: hashPassword, contacts: {} });
-        await user.save();
+        res.cookie("token", jwtToken, getCookieOptions()); // CHANGED: token now includes userId for auth
         res.status(201).json({
             message: "User registered successfully",
             success: true,
@@ -220,19 +219,6 @@ app.post("/login", async (req, res) => {
 
         const dbUserData = await Users.findOne({ email: email });
 
-        // const updatedUser = await Users.findOneAndUpdate(
-        //     { email }, // find user
-        //     {
-        //         $push: { receiveMSG: "hello this patch request test" } // add message to array
-        //     },
-        //     { new: true } // return updated document
-        // );
-
-        // res.json({
-        //     message: "Message added successfully",
-        //     user: updatedUser
-        // });
-
         if (!dbUserData) {
             return res.status(401).json({
                 message: "Invalid email or password",
@@ -243,16 +229,6 @@ app.post("/login", async (req, res) => {
 
         const isPasswordValid = await bcrypt.compare(password, dbUserData.password);
 
-        // Old code (problem): callback sets jwtToken asynchronously, response can be sent before this runs
-        // jwt.sign({email}, "secretkey", {expiresIn: '7d'} , (err, token) => {
-        //     if (err) {
-        //         res.status(500).json({ message:"Fail to generate token", success: false })
-        //     }
-        //     jwtToken = token;
-        // })
-        // let jwtToken;
-
-        // Fixed: use Promise wrapper + await so token is available before response
         if (!isPasswordValid) {
             return res.status(401).json({
                 message: "Invalid email or password",
@@ -262,7 +238,7 @@ app.post("/login", async (req, res) => {
         }
 
         const jwtToken = await new Promise((resolve, reject) => {
-            jwt.sign({ email: dbUserData.email }, process.env.JWT_SECRET || "chatConnect", { expiresIn: '7d' }, (err, token) => {
+            jwt.sign({ email: dbUserData.email, userId: dbUserData.userId }, process.env.JWT_SECRET || "chatConnect", { expiresIn: '7d' }, (err, token) => {
                 if (err) {
                     return reject(err);
                 }
@@ -270,7 +246,7 @@ app.post("/login", async (req, res) => {
             });
         });
 
-        res.cookie("token", jwtToken, getCookieOptions());
+        res.cookie("token", jwtToken, getCookieOptions()); // CHANGED: token now includes userId
 
         return res.status(200).json({
             message: "Login successful",
@@ -287,12 +263,19 @@ app.post("/login", async (req, res) => {
     }
 })
 
-app.post("/add-contact", async (req, res) => {
+app.post("/add-contact", verifyToken, async (req, res) => {
     try {
         const { userId, contactId, contactName } = req.body;
 
         const parsedUserId = Number(userId);
         const parsedContactId = Number(contactId);
+
+        if (req.user.userId !== parsedUserId) {
+            return res.status(403).json({
+                message: "You can only add contacts for your own account",
+                success: false
+            });
+        }
 
         if (!userId || !contactId || !contactName) {
             return res.status(400).json({
@@ -360,7 +343,7 @@ app.post("/add-contact", async (req, res) => {
     }
 })
 
-app.get("/contacts/:userId", async (req, res) => {
+app.get("/contacts/:userId", verifyToken, async (req, res) => {
     try {
         const { userId } = req.params;
         const parsedUserId = Number(userId);
@@ -368,6 +351,13 @@ app.get("/contacts/:userId", async (req, res) => {
         if (Number.isNaN(parsedUserId) || !Number.isInteger(parsedUserId)) {
             return res.status(400).json({
                 message: "Invalid userId, integer required",
+                success: false
+            });
+        }
+
+        if (req.user.userId !== parsedUserId) {
+            return res.status(403).json({
+                message: "You can only view your own contacts",
                 success: false
             });
         }
@@ -395,12 +385,13 @@ const messageSchema = new mongoose.Schema({
     senderId: { type: Number, required: true },
     receiverId: { type: Number, required: true },
     message: { type: String, required: true },
-    time: { type: String, required: true }
+    time: { type: String, required: true },
+    timestamp: { type: Date, required: true }
 })
 
 const Messages = mongoose.model('Messages', messageSchema);
 
-app.post("/send-message", async (req, res) => {
+app.post("/send-message", verifyToken, async (req, res) => {
     try {
         const options = {
             year: "numeric",
@@ -414,6 +405,16 @@ app.post("/send-message", async (req, res) => {
         const currentTime = new Intl.DateTimeFormat("en-US", options).format(new Date());
         const { senderId, receiverId, message } = req.body;
 
+        const parsedSenderId = Number(senderId);
+        const parsedReceiverId = Number(receiverId);
+
+        if (req.user.userId !== parsedSenderId) {
+            return res.status(403).json({
+                message: "You can only send messages from your own account",
+                success: false
+            });
+        }
+
         if (!senderId || !receiverId || !message) {
             return res.status(400).json({
                 message: "All fields are required",
@@ -421,7 +422,7 @@ app.post("/send-message", async (req, res) => {
             })
         }
 
-        const isReceiverExist = await Users.findOne({ userId: receiverId });
+        const isReceiverExist = await Users.findOne({ userId: parsedReceiverId });
 
         if (!isReceiverExist) {
             return res.status(404).json({
@@ -430,7 +431,7 @@ app.post("/send-message", async (req, res) => {
             })
         }
 
-        const newMessage = await Messages.create({ senderId, receiverId, message, time: currentTime });
+        const newMessage = await Messages.create({ senderId: parsedSenderId, receiverId: parsedReceiverId, message, time: currentTime, timestamp: new Date() });
         res.status(201).json({
             message: "Message sent successfully",
             success: true,
@@ -441,12 +442,28 @@ app.post("/send-message", async (req, res) => {
     }
 })
 
-app.get('/chat', async (req, res) => {
+app.get('/chat', verifyToken, async (req, res) => {
     try {
         const { user1, user2 } = req.query;
+        const parsedUser1 = Number(user1);
+        const parsedUser2 = Number(user2);
 
-        const user1Data = await Users.findOne({ userId: user1 });
-        const user2Data = await Users.findOne({ userId: user2 });
+        if (Number.isNaN(parsedUser1) || Number.isNaN(parsedUser2) || !Number.isInteger(parsedUser1) || !Number.isInteger(parsedUser2)) {
+            return res.status(400).json({
+                message: "Invalid user1 or user2, integer required",
+                success: false
+            });
+        }
+
+        if (req.user.userId !== parsedUser1 && req.user.userId !== parsedUser2) {
+            return res.status(403).json({
+                message: "You are not allowed to view this chat",
+                success: false
+            });
+        }
+
+        const user1Data = await Users.findOne({ userId: parsedUser1 });
+        const user2Data = await Users.findOne({ userId: parsedUser2 });
 
         if (!user1Data || !user2Data) {
             return res.status(404).json({
@@ -457,8 +474,8 @@ app.get('/chat', async (req, res) => {
 
         const messages = await Messages.find({
             $or: [
-                { senderId: user1, receiverId: user2 },
-                { senderId: user2, receiverId: user1 }
+                { senderId: parsedUser1, receiverId: parsedUser2 },
+                { senderId: parsedUser2, receiverId: parsedUser1 }
             ]
         }).sort({ timestamp: 1 });
 
