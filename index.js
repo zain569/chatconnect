@@ -104,12 +104,21 @@ const verifyToken = (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET || "chatConnect");
-        req.user = decoded; // Store decoded info in request for later use
-        next();
+        req.user = decoded;
+
+        // ADDED: Check if user still exists in database
+        Users.findOne({ userId: decoded.userId }).then(dbUser => {
+            if (!dbUser) {
+                return res.status(401).json({ message: "User account not found", token: false });
+            }
+            next();
+        }).catch(err => {
+            return res.status(500).json({ message: "Database error", token: false });
+        });
     } catch (err) {
         return res.status(401).json({ message: "Invalid token", token: false });
     }
-}
+};
 
 // ✅ Get users
 app.get('/users', verifyToken, async (req, res) => {
@@ -483,6 +492,33 @@ app.get('/chat', verifyToken, async (req, res) => {
 
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// ADDED: Delete account route
+app.delete("/delete-account", verifyToken, async (req, res) => {
+    try {
+        const userId = req.user.userId;
+
+        // Delete the user from database
+        const deletedUser = await Users.findOneAndDelete({ userId });
+
+        if (!deletedUser) {
+            return res.status(404).json({
+                message: "User not found",
+                success: false
+            });
+        }
+
+        // Clear the cookie
+        res.clearCookie("token", getCookieOptions());
+
+        res.status(200).json({
+            message: "Account deleted successfully",
+            success: true
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message, success: false });
     }
 });
 
